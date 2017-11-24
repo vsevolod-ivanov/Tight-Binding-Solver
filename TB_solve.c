@@ -10,6 +10,7 @@
 #include <cblas.h>
 #include <math.h>
 #include "mat_print.h"
+#include "hamiltonian.h"
  
 /* Main program */
 int main(int argc, char * * argv) {
