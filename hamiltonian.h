@@ -1,7 +1,9 @@
-#ifndef _LAPACKE_EXAMPLE_AUX_
-#define _LAPACKE_EXAMPLE_AUX_
+#ifndef _HAMILTONIAN_
+#define _HAMILTONIAN_
 
 
 lapack_complex_double graphene_H(lapack_int n, double* spin, double* vec, lapack_complex_double* coef);
 
-#endif /* _LAPACKE_EXAMPLE_AUX_*/
+
+
+#endif /* _HAMILTONIAN_*/

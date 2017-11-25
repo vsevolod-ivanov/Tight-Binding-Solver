@@ -213,7 +213,7 @@ void read_H( char* filename){//, double* nn_counts, double** H_tb){
 				temp2 = atof(word); //imag
 
 				param_vals[i] = temp1 + I*temp2;
-				printf( "Paramtest: (%6.2f,%6.2f)\n", creal( param_vals[i] ), cimag( param_vals[i] ) );
+				//printf( "Paramtest: (%6.2f,%6.2f)\n", creal( param_vals[i] ), cimag( param_vals[i] ) );
 			}
 		}
 		if (strcmp(word, "[HAMILTONIAN]") == 0) {
@@ -231,11 +231,11 @@ void read_H( char* filename){//, double* nn_counts, double** H_tb){
 		}
 	}
 	fclose(fp);
-	printf("Hamiltonian: \n");
+	//printf("Hamiltonian: \n");
 	//printf("%s\n", ham[0]);
 	//printf("%s\n", ham[1]);
 	for( j = 0; j < h_length; j++ ) {
-		printf("%s\n", ham[j]);
+		//printf("%s\n", ham[j]);
 	}
 
 	//printf("Test: %c", param_names[2][1]);
@@ -256,7 +256,7 @@ void read_H( char* filename){//, double* nn_counts, double** H_tb){
 		{
 			strcat(stopstring, "n");
 		}
-		printf("Stopstring: %s\n", stopstring);
+		//printf("Stopstring: %s\n", stopstring);
 
 		//for( j = 0; j < nn_counts[i]; i++){
 
@@ -269,7 +269,9 @@ void read_H( char* filename){//, double* nn_counts, double** H_tb){
 //void build_H()
 
 
-void find_neighbors( lapack_int n, double* lat_vecs , double* atom_vecs , double ** nn){
+void find_neighbors( lapack_int n, double* lat_vecs, double* atom_vecs,
+	double nndepth, double ** nn, int* nn_counts ){
+
 	lapack_int i ,j, k, l, m;
 
 	double a[3] = {0.0, 0.0, 0.0}, b[3];
@@ -278,10 +280,10 @@ void find_neighbors( lapack_int n, double* lat_vecs , double* atom_vecs , double
 	lapack_int rownum = 0;
 
 	// TODO!! Make this into a passable parameter.
-	lapack_int nndepth = 2;
+	//lapack_int nndepth = 2;
 
-	// Redefine for clarity (Doesn't work?!??!)
-	//double * p = *nn;
+	//Temporary neighbor array to store all possible NN.
+	double * tempnn;
 
 	//Want to search all adjacent unit cells nndepth deep
 	lapack_int dim = (2*nndepth + 1); 
@@ -290,17 +292,17 @@ void find_neighbors( lapack_int n, double* lat_vecs , double* atom_vecs , double
 	/*	Need 5 pieces of data in our array: 
 	 *	1. Start atom;	2. End atom;	3-5. x, y, z hopping vector
 	 *	
-	 *	- Each is a double for simplicity.
+	 *	- Store atom numbers as double to avoid multiple arrays.
 	 *	- The number of such entries is n * n * vol (all n*n pairs spanning vol cells).
 	*/
 
 	//	Initialize NN array.
-	(*nn) =  malloc( n * n * vol * 5 * sizeof(double ));
-	if ((*nn) == NULL) {
+	tempnn =  malloc( n * n * vol * 5 * sizeof(double ));
+	if (tempnn == NULL) {
 		printf("Memory allocation error when allocating atom vector array.\n");
 		exit(0);
 	}
-	memset((*nn), 0, n * n * vol * 5 * sizeof(double ));
+	memset(tempnn, 0, n * n * vol * 5 * sizeof(double ));
 	
 	//loop through each atom in unit cell (or supercell!)
 	for( m = 0; m < n; m++ ) {
@@ -314,17 +316,17 @@ void find_neighbors( lapack_int n, double* lat_vecs , double* atom_vecs , double
 						   	and the vector connecting them. */
 						rownum = m*n*vol + l*vol + (i+2)*dim*dim+(j+2)*dim+(k+2);
 						
-						(*nn)[rownum*5]   = (double) (m+1); 		//Start atom
-						(*nn)[rownum*5+1] = (double) (l+1); 		//End   atom
+						tempnn[rownum*5]   = (double) (m+1); 		//Start atom
+						tempnn[rownum*5+1] = (double) (l+1); 		//End   atom
 
 						/*	{0,3,6} contain the x vals; {1,4,7} the y vals; {2,5,8} the z vals.
 						 *	multiply by {i,j,k} to find the vector connecting unit cells,
 						 *  then add the difference in atom locations (within unit cell)
 						 *	to find the total vector.
 						 */ 
-						(*nn)[rownum*5+2] = i*lat_vecs[0]+j*lat_vecs[3]+k*lat_vecs[6]+atom_vecs[l*3+0]-atom_vecs[m*3+0];
-						(*nn)[rownum*5+3] = i*lat_vecs[1]+j*lat_vecs[4]+k*lat_vecs[7]+atom_vecs[l*3+1]-atom_vecs[m*3+1];
-						(*nn)[rownum*5+4] = i*lat_vecs[2]+j*lat_vecs[5]+k*lat_vecs[8]+atom_vecs[l*3+2]-atom_vecs[m*3+2];
+						tempnn[rownum*5+2] = i*lat_vecs[0]+j*lat_vecs[3]+k*lat_vecs[6]+atom_vecs[l*3+0]-atom_vecs[m*3+0];
+						tempnn[rownum*5+3] = i*lat_vecs[1]+j*lat_vecs[4]+k*lat_vecs[7]+atom_vecs[l*3+1]-atom_vecs[m*3+1];
+						tempnn[rownum*5+4] = i*lat_vecs[2]+j*lat_vecs[5]+k*lat_vecs[8]+atom_vecs[l*3+2]-atom_vecs[m*3+2];
 					}
 				}
 			}
@@ -332,11 +334,43 @@ void find_neighbors( lapack_int n, double* lat_vecs , double* atom_vecs , double
 	}
 
 	//Sort array (see compare_nn for the ordering)
-	qsort((void*)(*nn), n*n*vol, 5*sizeof(double), compare_nn);
+	qsort((void*)tempnn, n*n*vol, 5*sizeof(double), compare_nn);
+
+	double nnvecL = 0.0;
+	double nnvecLtemp = 0.0;
+	//int nntotal = 0;
+	j = -1;
+	i = 0;
+
+	while( i < nndepth + 1 ){
+		j++;
+		nnvecLtemp = pow(tempnn[5*j+2],2) + pow(tempnn[5*j+3],2) + pow(tempnn[5*j+4],2);
+		if ((nnvecLtemp - nnvecL) > 0.01 ){
+			nnvecL = nnvecLtemp;
+			i++;
+		}
+		nn_counts[i] += 1;
+		//nntotal ++;
+	}
+	//printf("NNcounts: (%i, %i, %i )\n", nn_counts[0], nn_counts[1], nn_counts[2]);
+	//printf("NNtotal: %i , %i\n", j);
+
+	//Allocate trimmed NN array
+	(*nn) =  malloc( j * 5 * sizeof(double ));
+	if ((*nn) == NULL) {
+		printf("Memory allocation error when allocating atom vector array.\n");
+		exit(0);
+	}
+	memset((*nn), 0, j * 5 * sizeof(double ));
+	for( i= 0; i < j * 5 ; i++ ) {
+		(*nn)[i] = tempnn[i];
+	}
 }
 
 
-int compare_nn( double* v1, double* v2){
+int compare_nn( const void* vec1, const void* vec2){
+	double* v1 = (double*)vec1;
+	double* v2 = (double*)vec2;
 	double d1, d2, xy_a1, xy_a2;
 	double proj1, proj2;
 	d1 = pow(v1[2],2) + pow(v1[3],2) + pow(v1[4],2);

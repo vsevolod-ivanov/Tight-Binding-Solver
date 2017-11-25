@@ -11,6 +11,7 @@
 #include <math.h>
 #include "mat_print.h"
 #include "hamiltonian.h"
+#include "hamiltonian.h"
  
 /* Main program */
 int main(int argc, char * * argv) {
@@ -29,6 +30,7 @@ int main(int argc, char * * argv) {
 	double lat_vectors[9];
 	double * atom_vectors;
 	double * nn;
+	int * nncounts;
 
 	n_cell = 1;						//Number of unit cells in supercell
 	k_points = 10;					//Number of k-points to plot
@@ -49,15 +51,33 @@ int main(int argc, char * * argv) {
 	printf("number of atoms: %i\n", n);
 	printf("number of nn: %i\n", nndepth);
 
-	find_neighbors(n, lat_vectors, atom_vectors, &nn);
+	nncounts = (int * ) malloc(nndepth * sizeof(int ));
+    if (nncounts == NULL) {
+    	printf("Memory allocation error when allocating NN counter array.\n");
+    	exit(0);
+	}
+	find_neighbors(n, lat_vectors, atom_vectors, nndepth, &nn, nncounts);
 
-	//print_rmatrix("Neighbors"  , n*n*125, 5, nn, 5);
+	//print_rmatrix("Neighbors", 34, 5, nn, 5);
+	printf("NNcounts: (%i, %i, %i )\n", nncounts[0], nncounts[1], nncounts[2]);
 
 	//char * test;
 	read_H("diamond.in");
 	for( j = 0; j < 9; j++ ) {
 		//printf("%s\n", test);
 	}
+
+	//Testing basic Hamiltonian function.
+	/*
+	lapack_complex_double test23 = {0.0, 0.0};
+	lapack_complex_double coeff[3] = {{0.0,0.0}, {1.0,0.0},{0.01,0.0}};
+	double spintest[3] = {0.0, 0.0, 1.0};
+	double vectest[3] = {0.0, 0.5, 0.866};
+	printf( "testpre: (%6.2f, %6.2f)\n\n", creal(test23), cimag(test23));
+	test23 = graphene_H(2, spintest, vectest, coeff);
+	printf( "testpost: (%6.4f, %6.4f)\n\n", creal(test23), cimag(test23));
+	*/
+	
 
 	//printf("nn[0]: %6.2f", nn[0]);
 	//print_dvector("test", 5, nn[0]);

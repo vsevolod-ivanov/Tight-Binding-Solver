@@ -13,9 +13,10 @@ void read_coords( char* filename, double* cell_vecs, double* lat_vecs ,
 
 //Computation
 
-void find_neighbors( lapack_int numatoms, double* lat_vecs , double* atom_vecs , double ** nn); 
+void find_neighbors( lapack_int numatoms, double* lat_vecs , double* atom_vecs 
+    ,double nndepth, double ** nn, int* nn_counts ); 
 void read_H( char* filename);
-int compare_nn( double* v1, double* v2);
+int compare_nn( const void* vec1, const void* vec2);
 double length_v( double* v1, double* v2);
 
 #endif /* _LAPACKE_EXAMPLE_AUX_*/
