@@ -122,9 +122,81 @@ int main(int argc, char * * argv) {
 
 	//generate some k points to loop over:
 
-	lapack_int numkpoints = 20; //temp value to store k point density 
-	for (i = 1; i < argc; i++) {
+	lapack_int nkp = 20; //temp value to store k point density 
 
+	//Start with 2d plane
+
+	double * berryC; //Contains all the Berry connections.
+	berryC = (double * ) malloc((nkp+1)*(nkp+1)*2 * n * 3 * sizeof(lapack_complex_double ));
+    if (berryC == NULL) {
+		printf("Memory allocation error when allocating band array.\n");
+	}
+	memset(berryC, 0, (nkp+1)*(nkp+1)*2 * n * 3 * sizeof(lapack_complex_double));
+    
+
+	l = 2; //Pick particular k-point layer
+	double kvc[3], kvf[3], kvb[3];
+	lapack_complex_double * evc, evf, evb;
+
+	//*******************
+	// Allocate temp H arrays
+	//*******************
+
+	evc = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evc == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evb == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evf = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evf == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+
+	memset(evc, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+
+	//*******************
+	//*******************
+
+
+	double kstep[3];
+	kstep[0] = 2.0*M_PI/sqrt( pow(lat_vectors[0],2) + pow(lat_vectors[1],2) + pow(lat_vectors[2],2) );
+	kstep[1] = 2.0*M_PI/sqrt( pow(lat_vectors[3],2) + pow(lat_vectors[4],2) + pow(lat_vectors[5],2) );
+	kstep[2] = 2.0*M_PI/sqrt( pow(lat_vectors[6],2) + pow(lat_vectors[7],2) + pow(lat_vectors[8],2) );
+
+	kstep[0] /= ((double) nkp);
+	kstep[1] /= ((double) nkp);
+	kstep[2] /= ((double) nkp);
+
+
+	for (i = 0; i < nkp+1; i++) {
+		for (j = 0; j < nkp+1; j++) {
+			
+			kvc[0] = (double i) * kstep[0];
+			kvc[1] = (double j) * kstep[1];
+			kvc[2] = (double l) * kstep[2];
+
+			kvb[0] = (double (i-1)) * kstep[0];
+			kvb[1] = (double (j-1)) * kstep[1];
+			kvb[2] = (double l) * kstep[2];
+
+			kvf[0] = (double (i+1)) * kstep[0];
+			kvf[1] = (double (j+1)) * kstep[1];
+			kvf[2] = (double l) * kstep[2];
+
+
+
+
+
+			
+		}
 	}
 
 

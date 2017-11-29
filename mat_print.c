@@ -596,9 +596,9 @@ void v_perp(double* nn_array, int* nn_counts, int nn_index, double* vec){
 				vec[1] /= mag;
 				vec[2] /= mag;
 				//Temp renormalization
-				vec[0] /= 0.866;
-				vec[1] /= 0.866;
-				vec[2] /= 0.866;
+				//vec[0] /= 0.866;
+				//vec[1] /= 0.866;
+				//vec[2] /= 0.866;
 				//break out of loop (This seems sloppy :/)
 				j = nn_counts[0]+nn_counts[1];
 				i = nn_counts[0]+nn_counts[1];
