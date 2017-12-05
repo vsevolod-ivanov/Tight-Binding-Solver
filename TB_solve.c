@@ -9,10 +9,12 @@
 #include <lapacke.h> 
 #include <cblas.h>
 #include <math.h>
-#include "mat_print.h"
+
 #include "hamiltonian.h"
-#include "hamiltonian.h"
- 
+//#include "hamiltonian.h"
+#include "ham_utils.h"
+#include "mat_print.h" 
+
 /* Main program */
 int main(int argc, char * * argv) {
 
@@ -29,6 +31,7 @@ int main(int argc, char * * argv) {
 	double cell_dims[3];
 	double lat_vectors[9];
 	double * atom_vectors;
+	double * kpath;
 	double * nn;
 	double * kpoints;
 	int * nncounts;
@@ -43,17 +46,17 @@ int main(int argc, char * * argv) {
 
 	/* Read from file */
 	//read_coords("diamond.in", cell_dims, lat_vectors, &atom_vectors, &n, &nndepth);
-	read_coords("graphene.struct", cell_dims, lat_vectors, &atom_vectors, &n, &nndepth);
+	read_coords("graphene.struct", cell_dims, lat_vectors, &atom_vectors, &kpoints, &n, &nndepth);
 
-	print_dvector("Cell Dimensions" , 3, cell_dims);
-	print_rmatrix("Lattice Vectors" , 3, 3, lat_vectors, 3);
+	//print_dvector("Cell Dimensions" , 3, cell_dims);
+	//print_rmatrix("Lattice Vectors" , 3, 3, lat_vectors, 3);
 	//printf("Test");
 	//printf("test: vec[%i,%i] = %8.5f\n", 1, 1 , atom_vectors[1*3+1]);
 	//printf("%8.5f" , atom_vectors[3]);
-	print_rmatrix("Atom Locations" , 2, 3, atom_vectors, 3);
+	//print_rmatrix("Atom Locations" , 2, 3, atom_vectors, 3);
 
-	printf("number of atoms: %i\n", n);
-	printf("number of nn: %i\n", nndepth);
+	//printf("number of atoms: %i\n", n);
+	//printf("number of nn: %i\n", nndepth);
 
 	nncounts = (int * ) malloc(nndepth * sizeof(int ));
     if (nncounts == NULL) {
@@ -65,16 +68,11 @@ int main(int argc, char * * argv) {
 
 	//printf("Number of NN: %i\n", )
 	//print_rmatrix("Neighbors", 34, 5, nn, 5);
-	printf("NNcounts: (%i, %i, %i )\n", nncounts[0], nncounts[1], nncounts[2]);
+	//printf("NNcounts: (%i, %i, %i )\n", nncounts[0], nncounts[1], nncounts[2]);
 
 	//char * test;
 	read_H("diamond.in");
 	
-
-	double ktest[3] = {1.2, 0.3, 0.0};	
-	lapack_complex_double* Htest;
-
-
 	//Find total number of NN
 	nntotal = 0;
 	for( i = 0; i < nndepth+1; i++ ) {
@@ -92,40 +90,20 @@ int main(int argc, char * * argv) {
 
 	build_C( nndepth, nntotal, nn, nncounts, coeftable, graphene_H);
 
-
-	printf("N: %i\n\n", n);
-	lapack_complex_double * H_tb;
 	//Allocate Hamiltonian memory
 	//x4 because spin in each dimension
+	lapack_complex_double * H_tb;
 	H_tb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
     if (H_tb == NULL) {
     	printf("Memory allocation error when allocating H_tb.\n");
     	exit(0);
 	}
-
 	memset(H_tb, 0, n * n * 4 * sizeof(lapack_complex_double ));
 	
-	build_H(n, ktest, nn, nntotal, H_tb, coeftable );
-	print_matrix("Tight-Binding Matrix (before): ", 2*n, 2*n, H_tb, 2*n);
 	
-
-	double eigs[4] = {0.0, 0.0, 0.0, 0.0};
-	//test diagonalization:
-	info = LAPACKE_zheev(LAPACK_ROW_MAJOR, 'V', 'L', 2*n, H_tb, 2*n, eigs );
-	
-	if( info > 0 ) {
-		printf( "The algorithm failed to compute eigenvalues.\n" );
-		exit( 1 );
-	}
-	print_matrix("Tight-Binding Matrix (after): ", 2*n, 2*n, H_tb, 2*n);
-	print_dvector("Eig: ", 2*n, eigs);
-
 	//generate some k points to loop over:
-
 	lapack_int nkp = 20; //temp value to store k point density 
-
 	//Start with 2d plane
-
 	double * berryC; //Contains all the Berry connections.
 	berryC = (double * ) malloc((nkp+1)*(nkp+1)*2 * n * 3 * sizeof(lapack_complex_double ));
     if (berryC == NULL) {
@@ -133,10 +111,23 @@ int main(int argc, char * * argv) {
 	}
 	memset(berryC, 0, (nkp+1)*(nkp+1)*2 * n * 3 * sizeof(lapack_complex_double));
     
-
 	l = 2; //Pick particular k-point layer
-	double kvc[3], kvf[3], kvb[3];
-	lapack_complex_double * evc, evf, evb;
+	double kvc[3];
+	double kvxf[3];
+	double kvxb[3];
+	double kvyf[3];
+	double kvyb[3];
+	double kvzf[3];
+	double kvzb[3];
+
+
+	lapack_complex_double * evc;
+	lapack_complex_double * evxf;
+	lapack_complex_double * evxb;
+	lapack_complex_double * evyf;
+	lapack_complex_double * evyb;
+	lapack_complex_double * evzf;
+	lapack_complex_double * evzb;
 
 	//*******************
 	// Allocate temp H arrays
@@ -147,20 +138,44 @@ int main(int argc, char * * argv) {
     	printf("Memory allocation error when allocating H_tb.\n");
     	exit(0);
 	}
-	evb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
-    if (evb == NULL) {
+	evxb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evxb == NULL) {
     	printf("Memory allocation error when allocating H_tb.\n");
     	exit(0);
 	}
-	evf = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
-    if (evf == NULL) {
+	evxf = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evxf == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evyb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evyb == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evyf = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evyf == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evzb = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evzb == NULL) {
+    	printf("Memory allocation error when allocating H_tb.\n");
+    	exit(0);
+	}
+	evzf = (lapack_complex_double * ) malloc(n * n * 4 * sizeof(lapack_complex_double ));
+    if (evzf == NULL) {
     	printf("Memory allocation error when allocating H_tb.\n");
     	exit(0);
 	}
 
 	memset(evc, 0, n * n * 4 * sizeof(lapack_complex_double ));
-	memset(evb, 0, n * n * 4 * sizeof(lapack_complex_double ));
-	memset(evf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evxb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evxf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evyb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evyf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evzb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+	memset(evzf, 0, n * n * 4 * sizeof(lapack_complex_double ));
 
 	//*******************
 	//*******************
@@ -175,38 +190,96 @@ int main(int argc, char * * argv) {
 	kstep[1] /= ((double) nkp);
 	kstep[2] /= ((double) nkp);
 
+	lapack_int m = 0; 	//Index for the bloch wavevector (eigenvector) we are using.
+						//Runs from 0 to 2*n - 1;
 
+	lapack_int o = 0;	//Index for each element of eigenvector;
+	
+	lapack_complex_double eigvecx[2*n];
+	lapack_complex_double eigvecy[2*n];
+	lapack_complex_double eigvecz[2*n];
 	for (i = 0; i < nkp+1; i++) {
 		for (j = 0; j < nkp+1; j++) {
 			
-			kvc[0] = (double i) * kstep[0];
-			kvc[1] = (double j) * kstep[1];
-			kvc[2] = (double l) * kstep[2];
+			kvc[0] = (double) i * kstep[0];
+			kvc[1] = (double) j * kstep[1];
+			kvc[2] = (double) l * kstep[2];
 
-			kvb[0] = (double (i-1)) * kstep[0];
-			kvb[1] = (double (j-1)) * kstep[1];
-			kvb[2] = (double l) * kstep[2];
+			kvxb[0] = (double) (i-1) * kstep[0];
+			kvxb[1] = (double) j * kstep[1];
+			kvxb[2] = (double) l * kstep[2];
 
-			kvf[0] = (double (i+1)) * kstep[0];
-			kvf[1] = (double (j+1)) * kstep[1];
-			kvf[2] = (double l) * kstep[2];
+			kvxf[0] = (double) (i+1) * kstep[0];
+			kvxf[1] = (double) j * kstep[1];
+			kvxf[2] = (double) l * kstep[2];
 
+			kvyb[0] = (double) i * kstep[0];
+			kvyb[1] = (double) (j-1) * kstep[1];
+			kvyb[2] = (double) l * kstep[2];
 
+			kvyf[0] = (double) i * kstep[0];
+			kvyf[1] = (double) (j+1) * kstep[1];
+			kvyf[2] = (double) l * kstep[2];
 
+			kvzb[0] = (double) i * kstep[0];
+			kvzb[1] = (double) j * kstep[1];
+			kvzb[2] = (double) (l-1) * kstep[2];
 
+			kvzf[0] = (double) i * kstep[0];
+			kvzf[1] = (double) j * kstep[1];
+			kvzf[2] = (double) (l+1) * kstep[2];
 
+			memset(evc, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evxb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evxf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evyb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evyf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evzb, 0, n * n * 4 * sizeof(lapack_complex_double ));
+			memset(evzf, 0, n * n * 4 * sizeof(lapack_complex_double ));
+
+			build_H(n, kvc, nn, nntotal, evc, coeftable );
+			build_H(n, kvxb, nn, nntotal, evxb, coeftable );
+			build_H(n, kvxf, nn, nntotal, evxf, coeftable );
+			build_H(n, kvyb, nn, nntotal, evyb, coeftable );
+			build_H(n, kvyf, nn, nntotal, evyf, coeftable );
+			build_H(n, kvzb, nn, nntotal, evzb, coeftable );
+			build_H(n, kvzf, nn, nntotal, evzf, coeftable );
 			
+			//Use second order central finite difference scheme
+
+			//printf("BC at (%6.4f, %6.4f, %6.4f):\n", kvc[0], kvc[1], kvc[2]);
+			//printf("%6.4f\t%6.4f\n", kvc[0], kvc[1]);
+			for (m = 0; m < 2*n; m ++) {
+				//printf("\nEigenvector start: \n");
+				eigvecx[o] = 0;
+				eigvecy[o] = 0;
+				eigvecz[o] = 0;
+				for (o = 0; o < 2*n; o ++) {
+					//test! Make sure you are printing the right eigenvectors
+					//printf("(%6.4f, %6.4f)", creal(evc[2*n*o+m]) , cimag(evc[2*n*o+m]));
+					
+					/*printf("eigx: (%6.4f, %6.4f), (%6.4f, %6.4f), (%6.4f, %6.4f)\n", creal(evxb[2*n*o+m]), cimag(evxb[2*n*o+m]), 
+					creal(evc[2*n*o+m]), cimag(evc[2*n*o+m]), creal(evxf[2*n*o+m]), cimag(evxf[2*n*o+m]));
+					printf("eigy: (%6.4f, %6.4f), (%6.4f, %6.4f), (%6.4f, %6.4f)\n", creal(evyb[2*n*o+m]), cimag(evyb[2*n*o+m]), 
+					creal(evc[2*n*o+m]), cimag(evc[2*n*o+m]), creal(evyf[2*n*o+m]), cimag(evyf[2*n*o+m]));
+					printf("eigz: (%6.4f, %6.4f), (%6.4f, %6.4f), (%6.4f, %6.4f)\n", creal(evzb[2*n*o+m]), cimag(evzb[2*n*o+m]), 
+					creal(evc[2*n*o+m]), cimag(evc[2*n*o+m]), creal(evzf[2*n*o+m]), cimag(evzf[2*n*o+m]));
+					*/
+					eigvecx[o] = evxb[2*n*o+m] - 2.0*evc[2*n*o+m] + evxf[2*n*o+m];
+					eigvecy[o] = evyb[2*n*o+m] - 2.0*evc[2*n*o+m] + evyf[2*n*o+m];
+					eigvecz[o] = evzb[2*n*o+m] - 2.0*evc[2*n*o+m] + evzf[2*n*o+m];
+					berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 0] += evc[2*n*o+m] * eigvecx[o];
+					berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 1] += evc[2*n*o+m] * eigvecy[o];
+					berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 2] += evc[2*n*o+m] * eigvecz[o];	
+				}
+
+				//printf("(%6.4f, %6.4f)", creal(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 0]), cimag(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 0]));
+				//printf("(%6.4f, %6.4f)", creal(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 1]), cimag(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 1]));
+				//printf("(%6.4f, %6.4f)\n", creal(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 2]), cimag(berryC[i*6*n*(nkp+1)+j*6*n+m*3 + 2]));
+			}
+			//printf("%6.4f\t %6.4f\n", creal(berryC[i*6*n*(nkp+1)+j*6*n+0*3 + 0]), creal(berryC[i*6*n*(nkp+1)+j*6*n+0*3 + 1]) ) ;
 		}
 	}
-
-
-
-	
-
-	//printf("nn[0]: %6.2f", nn[0]);
-	//print_dvector("test", 5, nn[0]);
-	//print_dvector("test", 5, nn[5]);
-
 
 	/* Arguments */
     for (i = 1; i < argc; i++) {
@@ -349,13 +422,13 @@ int main(int argc, char * * argv) {
 		p2_nn = cexp(I*phi2);
 		p3_nn = cexp(I*phi3);
 
-		printf( "k: (%6.2f, %6.2f)\n\n", creal(k[0]), creal(k[1]));
-		printf( "a1: (%6.2f, %6.2f)\n\n", creal(a1[0]), creal(a1[1]));
+		//printf( "\n\nk: (%6.2f, %6.2f)\n\n", creal(k[0]), creal(k[1]));
+		//printf( "a1: (%6.2f, %6.2f)\n\n", creal(a1[0]), creal(a1[1]));
 		cblas_zdotu_sub(2, k, 1, a1, 1, &phi1);
 		cblas_zdotu_sub(2, k, 1, a2, 1, &phi2);
 		cblas_zdotu_sub(2, k, 1, a3, 1, &phi3);
 
-		printf( "phi1: (%6.2f, %6.2f)\n\n", creal(phi1), cimag(phi1));
+		//printf( "phi1: (%6.2f, %6.2f)\n\n", creal(phi1), cimag(phi1));
 		p1_nnn = cexp(I*phi1);
 		//printf( "p1: (%6.2f, %6.2f)\n\n", creal(p1_nnn), cimag(p1_nnn));
 		//printf( "p1*: (%6.2f, %6.2f)\n\n", creal(conj(p1_nnn)), cimag(conj(p1_nnn)));
@@ -448,7 +521,7 @@ int main(int argc, char * * argv) {
 
 
 		// Display H_tb to check 
-		print_matrix("Tight-Binding Matrix (after init): ", n, n, H_tb, lda);
+		//print_matrix("Tight-Binding Matrix (after init): ", n, n, H_tb, lda);
 
 		info = LAPACKE_zheev(LAPACK_ROW_MAJOR, 'V', 'L', n, H_tb, lda, w );
 		
@@ -465,10 +538,10 @@ int main(int argc, char * * argv) {
 		}
 
 		//Eigenvalues
-		print_rmatrix( "Eigenvalues", 1, n, w, 1 );
+		//print_rmatrix( "Eigenvalues", 1, n, w, 1 );
 	
 		//Eigenvectors
-		print_matrix("Eigenvectors, columnwise: ", n, n, H_tb, lda);
+		//print_matrix("Eigenvectors, columnwise: ", n, n, H_tb, lda);
 
 		//printf("---------finished k-point %i------------\n\n",i+1 );
 	}

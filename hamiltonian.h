@@ -6,4 +6,4 @@ lapack_complex_double graphene_H(lapack_int n, double* spin, double* vec, lapack
 
 
 
-#endif /* _HAMILTONIAN_*/
+#endif /* _HAMILTONIAN_ */
