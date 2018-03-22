@@ -15,15 +15,17 @@ void find_neighbors( lapack_int n, double* lat_vecs, double* atom_vecs,
 
 	lapack_int rownum = 0;
 
-	// TODO!! Make this into a passable parameter.
-	//lapack_int nndepth = 2;
-
 	//Temporary neighbor array to store all possible NN.
 	double * tempnn;
 
 	//Want to search all adjacent unit cells nndepth deep
 	lapack_int dim = (2*nndepth + 1); 
 	lapack_int vol = dim*dim*dim;
+
+	// printf("dim: %i\n", dim);
+	// printf("vol: %i\n", vol);
+	// printf("n: %i\n", n);
+	// printf("nndepth: %i\n", nndepth);
 
 	/*	Need 5 pieces of data in our array: 
 	 *	1. Start atom;	2. End atom;	3-5. x, y, z hopping vector
@@ -50,7 +52,9 @@ void find_neighbors( lapack_int n, double* lat_vecs, double* atom_vecs,
 						
 						/*	Find the array index into which to write the nn pair, 
 						   	and the vector connecting them. */
-						rownum = m*n*vol + l*vol + (i+2)*dim*dim+(j+2)*dim+(k+2);
+						rownum = m*n*vol + l*vol + (i+nndepth)*dim*dim+(j+nndepth)*dim+(k+nndepth);
+
+						//printf("rownum: %i\n", rownum);
 						
 						tempnn[rownum*5]   = (double) (m+1); 		//Start atom
 						tempnn[rownum*5+1] = (double) (l+1); 		//End   atom
@@ -99,7 +103,7 @@ void find_neighbors( lapack_int n, double* lat_vecs, double* atom_vecs,
 		//nntotal ++;
 	}
 	//printf("NNcounts: (%i, %i, %i )\n", nn_counts[0], nn_counts[1], nn_counts[2]);
-	//printf("NNtotal: %i , %i\n", j);
+	//printf("NNtotal: %i \n", j);
 
 	//Allocate trimmed NN array
 	(*nn) =  malloc( j * 5 * sizeof(double ));
@@ -244,7 +248,221 @@ void build_dHdk(lapack_int H_size, double* k, double* nn, int nn_total,
 
 }
 
+void build_testH(lapack_int H_size, double* k, double* nn, int nn_total, 
+	lapack_complex_double* H_tb, lapack_complex_double* coef_table ){
+	
+	lapack_int i, j;
+	lapack_int x, y;
+	lapack_complex_double phase = 0.0;
 
+	//***** coefs *****
+	lapack_complex_double tx = -0.05;
+	lapack_complex_double ty = 0.05;
+	lapack_complex_double tz = 0.05;
+	lapack_complex_double kw = 0.7854;
+	lapack_complex_double mass = 0.1;
+
+	//*** end coefs ***
+
+	//Initialize dH/dk to all 0's
+	lapack_int H_shift = H_size * H_size * 4; //Size of one Hamiltonian.
+	memset(H_tb, 0, H_shift * sizeof(lapack_complex_double ));
+	H_tb[0] += 2*tx*(cos(k[0]) - cos(kw));
+	H_tb[3] += 2*tx*(cos(k[0]) - cos(kw));
+
+	H_tb[1] += mass*(2 - cos(k[1]) - cos(k[2]));
+	H_tb[2] += mass*(2 - cos(k[1]) - cos(k[2]));
+
+	H_tb[1] += -I*(2*ty*sin(k[1]));
+	H_tb[2] +=  I*(2*ty*sin(k[1]));
+
+	H_tb[0] +=  (2*tz*sin(k[2])); //upper left
+	H_tb[3] += -(2*tz*sin(k[2]));
+	/*
+	for( i = 1; i < 4; i++ ) {
+	//for( i = 1; i < nn_total; i++ ) {
+		//printf("\nx,y Coords: (%i, %i)\n", x , y);
+		x = (int) nn[5*i+0];
+		y = (int) nn[5*i+1];
+		x--;
+		y--;
+		//Do by terms 
+		
+		//Const term
+		H_tb[0] += 2*tx*(cos(k[0]*nn[5*i+2]) - cos(kw*nn[5*i+2])); //upper left
+		H_tb[3] += 2*tx*(cos(k[0]*nn[5*i+2]) - cos(kw*nn[5*i+2])); //lower right
+		// printf("Ham0: (%6.2f, %6.2f)\n", creal(H_tb[0]),cimag(H_tb[0]));
+		// printf("Ham3: (%6.2f, %6.2f)\n", creal(H_tb[3]),cimag(H_tb[3]));
+		//Sigma x
+		H_tb[1] += mass*(2 - cos(k[1]*nn[5*i+3]) - cos(k[2]*nn[5*i+4])); //upper right
+		H_tb[2] += mass*(2 - cos(k[1]*nn[5*i+3]) - cos(k[2]*nn[5*i+4])); //lower left
+		// printf("Ham1: (%6.2f, %6.2f)\n", creal(H_tb[1]),cimag(H_tb[1]));
+		// printf("Ham2: (%6.2f, %6.2f)\n", creal(H_tb[2]),cimag(H_tb[2]));
+		//Sigma y
+		H_tb[1] += -I*(2*ty*sin(k[1]*nn[5*i+3])); //upper right
+		H_tb[2] +=  I*(2*ty*sin(k[1]*nn[5*i+3])); //lower left
+		// printf("k: (%6.2f, %6.2f)\n", creal(k[1]),cimag(k[1]));
+		// printf("nn: (%6.2f, %6.2f)\n", creal(nn[5*i+3]),cimag(nn[5*i+3]));
+		// printf("sin(ky*ay): (%6.2f, %6.2f)\n", creal(sin(k[1]*nn[5*i+3])),cimag(sin(k[1]*nn[5*i+3])));
+		// printf("Ham1: (%6.2f, %6.2f)\n", creal(H_tb[1]),cimag(H_tb[1]));
+		// printf("Ham2: (%6.2f, %6.2f)\n", creal(H_tb[2]),cimag(H_tb[2]));
+		// //Sigma z
+		H_tb[0] +=  (2*tz*sin(k[2]*nn[5*i+4])); //upper left
+		H_tb[3] += -(2*tz*sin(k[2]*nn[5*i+4])); //lower right
+		// printf("Ham0: (%6.2f, %6.2f)\n", creal(H_tb[0]),cimag(H_tb[0]));
+		// printf("Ham3: (%6.2f, %6.2f)\n", creal(H_tb[3]),cimag(H_tb[3]));
+
+	}*/
+}
+
+
+void build_testdHdk(lapack_int H_size, double* k, double* nn, int nn_total, 
+	lapack_complex_double* dH_tb, lapack_complex_double* coef_table ){
+	
+	lapack_int i, j;
+	lapack_int x, y;
+	lapack_complex_double phase = 0.0;
+
+	//***** coefs *****
+	lapack_complex_double tx = -0.05;
+	lapack_complex_double ty = 0.05;
+	lapack_complex_double tz = 0.05;
+	lapack_complex_double kw = 0.7854;
+	lapack_complex_double mass = 0.1;
+
+	//*** end coefs ***
+
+	//Initialize dH/dk to all 0's
+	lapack_int H_shift = H_size * H_size * 4; //Size of one Hamiltonian.
+	memset(dH_tb, 0, H_shift * 3 * sizeof(lapack_complex_double ));
+
+	dH_tb[0] += 2*tx*(-sin(k[0]) ); //upper left
+	dH_tb[3] += 2*tx*(-sin(k[0]) );	
+
+	dH_tb[H_shift+1] += mass*(sin(k[1]) );
+	dH_tb[H_shift+2] += mass*(sin(k[1]) );
+	
+	dH_tb[H_shift+1] += -I*(2*ty*cos(k[1]));
+	dH_tb[H_shift+2] +=  I*(2*ty*cos(k[1]));
+	
+	dH_tb[2*H_shift+1] += mass*(sin(k[2]));
+	dH_tb[2*H_shift+2] += mass*(sin(k[2]));
+	
+	dH_tb[2*H_shift+0] +=  (2*tz*cos(k[2]));
+	dH_tb[2*H_shift+3] += -(2*tz*cos(k[2]));
+
+
+	/*for( i = 1; i < 4; i++ ) {
+	//for( i = 1; i < nn_total; i++ ) {
+		//printf("\nx,y Coords: (%i, %i)\n", x , y);
+		x = (int) nn[5*i+0];
+		y = (int) nn[5*i+1];
+		x--;
+		y--;
+		//Do by terms 
+		
+		//Dx Hamiltonian
+		dH_tb[0] += 2*tx*(-nn[5*i+2]*sin(k[0]*nn[5*i+2]) ); //upper left
+		dH_tb[3] += 2*tx*(-nn[5*i+2]*sin(k[0]*nn[5*i+2]) ); //lower right
+		if (i == 0){
+			printf("\n***dx terms***\n");
+			printf("k[0] and a_x: %6.2f, %6.2f\n", k[0], nn[5*i+2]);
+			printf("Ham val: (%6.2f, %6.2f)\n", creal(dH_tb[0]),cimag(dH_tb[0]));
+		}
+		//printf("Ham val: (%6.2f, %6.2f)\n", creal(dH_tb[0]),cimag(dH_tb[0]));
+		//All other terms are 0
+
+		//Dy Hamiltonian
+		dH_tb[H_shift+0] += 0; //upper left
+		dH_tb[H_shift+3] += 0; //lower right
+		//Sigma x
+		dH_tb[H_shift+1] += mass*(nn[5*i+3]*sin(k[1]*nn[5*i+3]) ); //upper right
+		dH_tb[H_shift+2] += mass*(nn[5*i+3]*sin(k[1]*nn[5*i+3]) ); //lower left
+		//Sigma y
+		dH_tb[H_shift+1] += -I*(2*ty*nn[5*i+3]*cos(k[1]*nn[5*i+3])); //upper right
+		dH_tb[H_shift+2] +=  I*(2*ty*nn[5*i+3]*cos(k[1]*nn[5*i+3])); //lower left
+		//Sigma z
+		dH_tb[H_shift+0] += 0; //upper left
+		dH_tb[H_shift+3] += 0; //lower right
+
+		//Dz Hamiltonian
+		dH_tb[2*H_shift+0] += 0; //upper left
+		dH_tb[2*H_shift+3] += 0; //lower right
+		//Sigma x
+		dH_tb[2*H_shift+1] += mass*(nn[5*i+4]*sin(k[2]*nn[5*i+4])); //upper right
+		dH_tb[2*H_shift+2] += mass*(nn[5*i+4]*sin(k[2]*nn[5*i+4])); //lower left
+		//Sigma y
+		dH_tb[2*H_shift+1] += 0; //upper right
+		dH_tb[2*H_shift+2] += 0; //lower left
+		//Sigma z
+		dH_tb[2*H_shift+0] +=  (2*tz*nn[5*i+4]*cos(k[2]*nn[5*i+4])); //upper left
+		dH_tb[2*H_shift+3] += -(2*tz*nn[5*i+4]*cos(k[2]*nn[5*i+4])); //lower right
+
+	}*/
+
+
+}
+
+void build_testH2(lapack_int H_size, double* k, double* nn, int nn_total, 
+	lapack_complex_double* H_tb, lapack_complex_double* coef_table ){
+	
+	lapack_int i, j;
+	lapack_int x, y;
+	lapack_complex_double phase = 0.0;
+
+	//***** coefs *****
+	lapack_complex_double tx = -0.05;
+	lapack_complex_double ty = 0.05;
+	lapack_complex_double tz = 0.05;
+	lapack_complex_double kw = 0.7854;
+	lapack_complex_double mass = 0.1;
+	//*** end coefs ***
+
+	//Initialize dH/dk to all 0's
+	lapack_int H_shift = H_size * H_size * 4; //Size of one Hamiltonian.
+	memset(H_tb, 0, H_shift * sizeof(lapack_complex_double ));
+	
+	H_tb[1] += 2*tx*(cos(k[0]) - cos(kw)) + mass*(2 - cos(k[0]) - cos(k[1]));
+	H_tb[2] += 2*tx*(cos(k[0]) - cos(kw)) + mass*(2 - cos(k[0]) - cos(k[1]));
+
+	H_tb[1] += -I*(2*ty*sin(k[1]));
+	H_tb[2] +=  I*(2*ty*sin(k[1]));
+
+	H_tb[0] +=  (2*tz*sin(k[2]));
+	H_tb[3] += -(2*tz*sin(k[2]));
+}
+
+void build_test2dHdk(lapack_int H_size, double* k, double* nn, int nn_total, 
+	lapack_complex_double* dH_tb, lapack_complex_double* coef_table ){
+	
+	lapack_int i, j;
+	lapack_int x, y;
+	lapack_complex_double phase = 0.0;
+
+	//***** coefs *****
+	lapack_complex_double tx = -0.05;
+	lapack_complex_double ty = 0.05;
+	lapack_complex_double tz = 0.05;
+	lapack_complex_double kw = 0.7854;
+	lapack_complex_double mass = 0.1;
+
+	//*** end coefs ***
+
+	//Initialize dH/dk to all 0's
+	lapack_int H_shift = H_size * H_size * 4; //Size of one Hamiltonian.
+	memset(dH_tb, 0, H_shift * 3 * sizeof(lapack_complex_double ));
+	//X
+	dH_tb[1] += -2*tx*sin(k[0]) + mass*sin(k[0]) ;
+	dH_tb[2] += -2*tx*sin(k[0]) + mass*sin(k[0]) ;
+	//Y
+	dH_tb[H_shift+1] += mass*sin(k[1]);
+	dH_tb[H_shift+2] += mass*sin(k[1]);
+	dH_tb[H_shift+1] += -I*(2*ty*cos(k[1]));
+	dH_tb[H_shift+2] +=  I*(2*ty*cos(k[1]));
+	//Z
+	dH_tb[2*H_shift+0] +=  (2*tz*cos(k[2]));
+	dH_tb[2*H_shift+3] += -(2*tz*cos(k[2]));
+}
 
 int compare_nn( const void* vec1, const void* vec2){
 	double* v1 = (double*)vec1;

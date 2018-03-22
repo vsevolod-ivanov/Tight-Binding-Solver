@@ -17,6 +17,18 @@ void build_C(lapack_int nn_depth, int nn_total, double* nn,
 void build_H(lapack_int H_size, double* k, double* nn, int nn_total, 
     lapack_complex_double* H_tb, lapack_complex_double* coef_table );
 
+void build_testH(lapack_int H_size, double* k, double* nn, int nn_total, 
+    lapack_complex_double* H_tb, lapack_complex_double* coef_table );
+
+void build_testdHdk(lapack_int H_size, double* k, double* nn, int nn_total, 
+    lapack_complex_double* H_tb, lapack_complex_double* coef_table );
+
+void build_test2dHdk(lapack_int H_size, double* k, double* nn, int nn_total, 
+    lapack_complex_double* dH_tb, lapack_complex_double* coef_table );
+
+void build_testH2(lapack_int H_size, double* k, double* nn, int nn_total, 
+    lapack_complex_double* H_tb, lapack_complex_double* coef_table );
+
 void build_dHdk(lapack_int H_size, double* k, double* nn, int nn_total, 
     lapack_complex_double* dH_tb, lapack_complex_double* coef_table );
         
