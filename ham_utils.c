@@ -122,6 +122,527 @@ void find_neighbors( lapack_int n, double* lat_vecs, double* atom_vecs,
 
 }
 
+void find_neighbors_cutoff( lapack_int n, double* lat_vecs , double* atom_vecs , int* H_map, lapack_int* map_S 
+    ,double cutoff, lapack_int ** nn, double ** nn_vecs, lapack_int* nn_total ){
+
+	lapack_int i ,j, k, l, m;
+
+	//Temporary neighbor array to store all possible NN.
+	lapack_int * tempnn;
+	double * tempnn_vecs;
+
+	//find how many unit cells to go in each direction
+	//need to figure out a way to do this more intelligently
+	lapack_int x_cutoff = 8; //ceil(cutoff/lat_vecs[0])
+	lapack_int y_cutoff = 8;
+	lapack_int z_cutoff = 6;
+
+	lapack_int dimx = 2*x_cutoff+1;
+	lapack_int dimy = 2*y_cutoff+1;
+	lapack_int dimz = 2*z_cutoff+1;
+	lapack_int vol = dimx*dimy*dimz;
+
+	/*	Need 5 pieces of data in our array: 
+	 *	1. Start atom;	2. End atom;	3-5. unit cell of end atom, N_x, N_y, N_z.
+	 *	
+	 *	- The number of such entries is n * n * vol (all n*n pairs spanning vol cells).
+	*/
+
+	//	Initialize NN array.
+	tempnn =  malloc( n * n * vol * 3 * sizeof(lapack_int ));
+	if (tempnn == NULL) {
+		printf("Memory allocation error when allocating temp nn array.\n");
+		exit(0);
+	}
+	tempnn_vecs = malloc( n * n * vol * 3 * sizeof(double));
+	if (tempnn_vecs == NULL) {
+		printf("Memory allocation error when allocating temp nn hopping vector array.\n");
+		exit(0);
+	}
+	memset(tempnn, 0, n * n * vol * 3 * sizeof(lapack_int ));
+	memset(tempnn_vecs, 0, n * n * vol * 3 * sizeof(double));
+
+	double hop_V[3]={0.0,0.0,0.0}; 	//Hopping vector from start to end atom
+	double hop_L=0.0;				//Hopping vector length
+
+	int dM[3] = {2*map_S[0]+1, 2*map_S[1]+1, 2*map_S[2]+1}; //lookup table dimensions
+	int indexval = 0;
+	
+
+	lapack_int rownum = 0;
+	//loop through each atom in unit cell (or supercell!)
+	for( m = 0; m < n; m++ ) {
+		for( l = 0; l < n; l++ ) {
+			//Generate adjacent unit cells (nndepth unit cells deep)
+			for( i = -x_cutoff ; i < x_cutoff+1; i++ ) {
+				for( j = -y_cutoff ; j < y_cutoff +1; j++ ) {
+					for( k = -z_cutoff ; k < z_cutoff +1; k++ ) {
+						
+						/*	{0,3,6} contain the x vals; {1,4,7} the y vals; 
+						 *	{2,5,8} the z vals. Multiply by {i,j,k} to find
+						 *	the vector connecting unit cells, then add the 
+						 * 	difference in atom locations (within unit cell)
+						 *	to find the total vector.
+						 */ 
+
+						hop_V[0] = 	((double) i ) * lat_vecs[0]
+									+((double) j ) * lat_vecs[3]
+									+((double) k ) * lat_vecs[6]
+									+atom_vecs[l*3+0]-atom_vecs[m*3+0];
+						hop_V[1] = 	((double) i ) * lat_vecs[1]
+									+((double) j ) * lat_vecs[4]
+									+((double) k ) * lat_vecs[7]
+									+atom_vecs[l*3+1]-atom_vecs[m*3+1];
+						hop_V[2] = 	((double) i ) * lat_vecs[2]
+									+((double) j ) * lat_vecs[5]
+									+((double) k ) * lat_vecs[8]
+									+atom_vecs[l*3+2]-atom_vecs[m*3+2];
+						
+						//Find length
+						hop_L = sqrt(pow(hop_V[0],2) + pow(hop_V[1],2)
+								+ pow(hop_V[2],2));
+
+						if(hop_L < cutoff){
+							//record the current pair
+							tempnn[rownum*3]   = (m); 		//Start atom
+							tempnn[rownum*3+1] = (l); 		//End   atom
+							//find index for coefficient lookup table
+							indexval = 	(i+map_S[0])*dM[1]*dM[2]+
+										(j+map_S[1])*dM[2]+
+										(k+map_S[2]);
+							
+							indexval = (n*H_map[indexval]+m)*n+l;
+							tempnn[rownum*3+2] = indexval; //save in nn array for convenience
+
+							tempnn_vecs[rownum*3+0] = hop_V[0];
+							tempnn_vecs[rownum*3+1] = hop_V[1];
+							tempnn_vecs[rownum*3+2] = hop_V[2];
+							
+							//increment rownum
+							rownum += 1;
+						}
+					
+					}
+				}
+			}
+		}
+	}
+
+	//printf("rownum: %i\n", rownum);
+	(*nn_total) = rownum;
+
+	//Allocate trimmed NN array
+	(*nn) =  malloc( rownum * 3 * sizeof(lapack_int ));
+	if ((*nn) == NULL) {
+		printf("Memory allocation error when allocating nn array.\n");
+		exit(0);
+	}
+	memset((*nn), 0, rownum * 3 * sizeof(lapack_int ));
+	//Allocate trimmed NN hopping vector array
+	(*nn_vecs) =  malloc( rownum * 3 * sizeof(double ));
+	if ((*nn_vecs) == NULL) {
+		printf("Memory allocation error when allocating nn hopping vector array.\n");
+		exit(0);
+	}
+	memset((*nn_vecs), 0, rownum * 3 * sizeof(double ));
+
+	for( i= 0; i < rownum * 3 ; i++ ) {
+		(*nn_vecs)[i] = tempnn_vecs[i];
+		(*nn)[i] = tempnn[i];
+	}
+}
+
+void find_weyl( lapack_int nkp, double* bC, double*  kdif){
+	
+	lapack_int s = 2*nkp+2; //array size
+	lapack_int i, j, k;
+	lapack_int x, y, z;
+
+	double kvc[3] = {0.0,0.0,0.0};
+
+	double tempbC[3] = {0.0,0.0,0.0};
+
+	double bCsum = 0.0;
+
+	lapack_int weylcount = 0;
+
+	//double kdif[3] = {0.0,0.0,0.0};
+	for (i = -nkp+1; i < nkp-1; i++) {
+		for (j = -nkp+1; j < nkp-1; j++) {
+			for (k = -nkp+1; k < nkp-1; k++) {
+				x = i + nkp + 1;
+				y = j + nkp + 1;
+				z = k + nkp + 1;
+
+				tempbC[0] =  1.0*bC[3*((x-2)*s*s+(y+0)*s+(z+0))+0]
+						    -8.0*bC[3*((x-1)*s*s+(y+0)*s+(z+0))+0] 
+							+8.0*bC[3*((x+1)*s*s+(y+0)*s+(z+0))+0]
+							-1.0*bC[3*((x+2)*s*s+(y+0)*s+(z+0))+0];
+
+				tempbC[1] =  1.0*bC[3*((x+0)*s*s+(y-2)*s+(z+0))+1]
+						    -8.0*bC[3*((x+0)*s*s+(y-1)*s+(z+0))+1] 
+							+8.0*bC[3*((x+0)*s*s+(y+1)*s+(z+0))+1]
+							-1.0*bC[3*((x+0)*s*s+(y+2)*s+(z+0))+1];
+
+				tempbC[2] =  1.0*bC[3*((x+0)*s*s+(y+0)*s+(z-2))+2]
+						    -8.0*bC[3*((x+0)*s*s+(y+0)*s+(z-1))+2] 
+							+8.0*bC[3*((x+0)*s*s+(y+0)*s+(z+1))+2]
+							-1.0*bC[3*((x+0)*s*s+(y+0)*s+(z+2))+2];
+
+				tempbC[0]/= (12.0*kdif[0]);
+				tempbC[1]/= (12.0*kdif[1]);
+				tempbC[2]/= (12.0*kdif[2]);
+
+				bCsum = (tempbC[0] + tempbC[1] + tempbC[2]);//*kdif[0]*kdif[1]*kdif[2];
+
+				kvc[0] = (double) i * kdif[0] + 0.025; //Shifted so no sym lines
+				kvc[1] = (double) j * kdif[1] + 0.025;
+				kvc[2] = (double) k * kdif[2] + 0.025;
+				if( fabs(bCsum) >= 1.0){
+				//if( (fabs(bCsum) >= 1.0) && (fabs(kvc[2])<0.1) ){
+					printf("Weyl%i: (%6.2f,%6.2f,%6.2f): %6.2f\n", weylcount, kvc[0],kvc[1],kvc[2], bCsum);
+					//printf("%9.6f\t%9.6f\t%9.6f\t%9.6f\n",kvc[0],kvc[1],kvc[2], bCsum);
+					weylcount ++;
+				}
+				
+			}
+		}
+	}
+
+}
+
+void find_weyl2( lapack_int nkp, double* bC, double*  kdif){
+	
+	lapack_int s = 2*nkp+2; //array size
+	lapack_int i, j, k;
+	lapack_int x, y, z;
+
+	double kvc[3] = {0.0,0.0,0.0};
+
+	double tempbC[3] = {0.0,0.0,0.0};
+
+	double bCsum = 0.0;
+
+	lapack_int weylcount = 0;
+
+	lapack_int m,n;
+
+	//double kdif[3] = {0.0,0.0,0.0};
+	for (i = -nkp+1; i < nkp-1; i++) {
+		for (j = -nkp+1; j < nkp-1; j++) {
+			for (k = -nkp+1; k < nkp-1; k++) {
+				x = i + nkp + 1;
+				y = j + nkp + 1;
+				z = k + nkp + 1;
+
+				//top and bottom face
+				for (m = -2; m < 3; m++) {
+					for (n = -2; n < 3; n++) {
+						bCsum+=bC[3*((x+m)*s*s+(y+n)*s+(z+2))+2]*kdif[0]*kdif[1];
+						bCsum-=bC[3*((x+m)*s*s+(y+n)*s+(z-2))+2]*kdif[0]*kdif[1];
+					}
+				}
+
+				//xz
+				for (m = -2; m < 3; m++) {
+					for (n = -2; n < 3; n++) {
+						bCsum+=bC[3*((x+m)*s*s+(y+2)*s+(z+n))+1]*kdif[0]*kdif[2];
+						bCsum-=bC[3*((x+m)*s*s+(y-2)*s+(z+n))+1]*kdif[0]*kdif[2];
+					}
+				}
+
+				//yz
+				for (m = -2; m < 3; m++) {
+					for (n = -2; n < 3; n++) {
+						bCsum+=bC[3*((x+2)*s*s+(y+m)*s+(z+n))+0]*kdif[1]*kdif[2];
+						bCsum-=bC[3*((x-2)*s*s+(y+m)*s+(z+n))+0]*kdif[1]*kdif[2];
+					}
+				}
+
+				kvc[0] = (double) i * kdif[0] + 0.03; //Shifted so no sym lines
+				kvc[1] = (double) j * kdif[1] + 0.01;
+				kvc[2] = (double) k * kdif[2] + 0.02;
+
+				
+				if( fabs(bCsum) >= 1.0){
+				//if( (fabs(bCsum) >= 1.0) && (fabs(kvc[2])<0.1) ){
+					printf("Weyl%i: (%6.2f,%6.2f,%6.2f): %6.2f\n", weylcount, kvc[0],kvc[1],kvc[2], bCsum);
+					//printf("%9.6f\t%9.6f\t%9.6f\n",kvc[0],kvc[1],kvc[2]);
+					weylcount ++;
+				}
+
+				//if weylcount = 85
+				
+			}
+		}
+	}
+
+}
+
+void find_weyl3( lapack_int nkp, double* bC, double*  kdif, double* bZvec, lapack_int bN, lapack_int btotal){
+	
+	// bN is band number
+	// btotal is total number of bands
+	lapack_int s = 2*nkp+2; //array size
+	lapack_int i, j, k;
+	lapack_int x, y, z;
+
+	double kvc[3] = {0.0,0.0,0.0};
+
+	double tempbC[3] = {0.0,0.0,0.0};
+
+	double bCsum = 0.0;
+
+	lapack_int weylcount = 0;
+
+	double* divBC;
+	divBC = (double * ) malloc( 8 * nkp * nkp * nkp * sizeof(double ));
+    if (divBC == NULL) {
+    	printf("Memory allocation error when allocating temp div Berry Curvature array.\n");
+    	exit(0);
+	}
+	memset(divBC, 0, 8 * nkp * nkp * nkp * sizeof(double ));
+
+	//double kdif[3] = {0.0,0.0,0.0};
+	for (i = -nkp; i < nkp; i++) {
+		for (j = -nkp; j < nkp; j++) {
+			for (k = -nkp; k < nkp; k++) {
+				x = i + nkp + 1;
+				y = j + nkp + 1;
+				z = k + nkp + 1;
+
+				tempbC[0] = -1.0*bC[3*bN + 3*btotal*((x-1)*s*s+(y+0)*s+(z+0))+0] 
+							+1.0*bC[3*bN + 3*btotal*((x+1)*s*s+(y+0)*s+(z+0))+0];
+
+				tempbC[1] = -1.0*bC[3*bN + 3*btotal*((x+0)*s*s+(y-1)*s+(z+0))+1] 
+							+1.0*bC[3*bN + 3*btotal*((x+0)*s*s+(y+1)*s+(z+0))+1];
+							
+				tempbC[2] = -1.0*bC[3*bN + 3*btotal*((x+0)*s*s+(y+0)*s+(z-1))+2] 
+							+1.0*bC[3*bN + 3*btotal*((x+0)*s*s+(y+0)*s+(z+1))+2];
+
+				tempbC[0]/= (2.0*kdif[0]);
+				tempbC[1]/= (2.0*kdif[1]);
+				tempbC[2]/= (2.0*kdif[2]);
+
+				divBC[weylcount] = (tempbC[0] + tempbC[1] + tempbC[2])*kdif[0]*kdif[1]*kdif[2];
+
+				weylcount ++;
+				/*
+				kvc[0] = (double) i * kdif[0] + 0.005; //Shifted so no sym lines
+				kvc[1] = (double) j * kdif[1] + 0.005;
+				kvc[2] = (double) k * kdif[2] + 0.005;
+				if( fabs(bCsum) >= 1.0){
+				//if( (fabs(bCsum) >= 1.0) && (fabs(kvc[2])<0.1) ){
+					printf("Weyl%i: (%6.2f,%6.2f,%6.2f): %6.2f\n", weylcount, kvc[0],kvc[1],kvc[2], bCsum);
+					//printf("%9.6f\t%9.6f\t%9.6f\t%9.6f\n",kvc[0],kvc[1],kvc[2], );
+					
+				}*/
+				
+			}
+		}
+	}
+
+	//TaAs vectors for finding kpoints:
+	/*double bZvec[9] = { 0.05191996, -0.00418614, -0.01476653,
+						0.0       ,  0.05208845, -0.01476653,
+						0.00834522, 0.00769945, 0.02715958 };*/
+
+	//sum over 3x3x3 cubes
+	weylcount = 0;
+	s = 2*nkp;
+	lapack_int m,n,o;
+	for (i = -nkp+1; i < nkp-1; i++) {
+		for (j = -nkp+1; j < nkp-1; j++) {
+			for (k = -nkp+1; k < nkp-1; k++) {
+				x = i + nkp;
+				y = j + nkp;
+				z = k + nkp;
+
+				bCsum = 0.0;
+				for (m = -1; m < 2; m++) {
+					for (n = -1; n < 2; n++) {
+						for (o = -1; o < 2; o++) {
+							bCsum += divBC[(x+m)*s*s+(y+n)*s+(z+o)];
+						}
+					}
+				}
+
+
+				kvc[0] = ((double) i) * bZvec[0] + ((double) j) * bZvec[3] + ((double) k) * bZvec[6] + 0.01;
+				kvc[1] = ((double) i) * bZvec[1] + ((double) j) * bZvec[4] + ((double) k) * bZvec[7] + 0.02;
+				kvc[2] = ((double) i) * bZvec[2] + ((double) j) * bZvec[5] + ((double) k) * bZvec[8] + 0.01;
+				
+				
+				//kvc[0] = ((double) i +0.5) * bZvec[0] + ((double) j+0.5) * bZvec[3] + ((double) k+0.5) * bZvec[6];
+				//kvc[1] = ((double) i +0.5) * bZvec[1] + ((double) j+0.5) * bZvec[4] + ((double) k+0.5) * bZvec[7];
+				//kvc[2] = ((double) i +0.5) * bZvec[2] + ((double) j+0.5) * bZvec[5] + ((double) k+0.5) * bZvec[8];
+				
+				// if (fabs(kvc[2]) > 0.8){
+				// 	printf("i,j,k: (%i, %i, %i)\n", i, j, k);
+				// }
+
+				// kvc[0] = (double) i * kdif[0] + 0.005; //Shifted so no sym lines
+				// kvc[1] = (double) j * kdif[1] + 0.005;
+				// kvc[2] = (double) k * kdif[2] + 0.005;
+				if( fabs(bCsum) >= 0.05){
+				//if( (fabs(bCsum) >= 1.0) && (fabs(kvc[2])<0.1) ){
+					//printf("Band%i, weyl#%i: (%6.2f,%6.2f,%6.2f): %9.6f\n", bN, weylcount, kvc[0],kvc[1],kvc[2], bCsum);
+					printf("%9.6f\t%9.6f\t%9.6f\t%9.6f\n",kvc[0],kvc[1],kvc[2],bCsum);
+					weylcount ++;
+				}
+			}
+		}
+	}
+
+}
+
+void find_weyl4( lapack_int nkp, lapack_complex_double * evc, lapack_int n , lapack_int bN, double* bC){
+	// bN is band number
+	// btotal is total number of bands
+	lapack_int s = 2*nkp+2; //array size
+	lapack_int i, j, k , l;
+	lapack_int x, y, z;
+	lapack_int kindexi; //array location corresponding to starting k-point
+	lapack_int kindexf; //array location corresponding to ending k-point
+	lapack_int BCcount = 0;
+
+	//Multiplication consts
+	lapack_complex_double alpha = {1.0,0.0}; //Matrix multiplication is unscaled
+	lapack_complex_double beta = {0.0,0.0};	//Don't copy existing matrix
+
+	//Compute link variables (3 per k point, per band)
+	lapack_complex_double * tempP; //Temp array to store inner product
+	tempP = (lapack_complex_double * ) malloc(n * n  * sizeof(lapack_complex_double ));
+    if (tempP == NULL) {
+    	printf("Memory allocation error when allocating temporary matrix product storage.\n");
+    	exit(0);
+	}
+	memset(tempP, 0, n * n * sizeof(lapack_complex_double ));
+
+	lapack_complex_double * berryc; //Temp array to store inner product
+	berryc = (lapack_complex_double * ) malloc(3*n*8*nkp*nkp*nkp* sizeof(lapack_complex_double ));
+    if (berryc == NULL) {
+    	printf("Memory allocation error when allocating temporary matrix product storage.\n");
+    	exit(0);
+	}
+	memset(berryc, 0, 3*n*8*nkp*nkp*nkp* sizeof(lapack_complex_double ));
+	printf("\nTest0\n");
+
+	for (i = -nkp; i < nkp; i++) {
+		for (j = -nkp; j < nkp; j++) {
+			for (k = -nkp; k < nkp; k++) {
+
+				x = i + nkp + 1;
+				y = j + nkp + 1;
+				z = k + nkp + 1;
+
+				//x direction first
+				kindexi = (x)*s*s+(y)*s+(z);
+				kindexf = (x+1)*s*s+(y)*s+(z);
+				
+
+				cblas_zgemm(CblasRowMajor, CblasConjTrans, CblasNoTrans, n, n, n, &alpha, 
+								&evc[kindexi*n*n], n, &evc[kindexf*n*n], n, &beta, tempP, n);
+				for (l = 0; l < n; l++) {
+					berryc[3*BCcount*n+l]=tempP[l*n+l]/cabs(tempP[l*n+l]);
+				}
+				//y dir
+				kindexf = (x)*s*s+(y+1)*s+(z);
+				cblas_zgemm(CblasRowMajor, CblasConjTrans, CblasNoTrans, n, n, n, &alpha, 
+								&evc[kindexi*n*n], n, &evc[kindexf*n*n], n, &beta, tempP, n);
+				for (l = 0; l < n; l++) {
+					berryc[3*BCcount*n+n+l]=tempP[l*n+l]/cabs(tempP[l*n+l]);
+				}
+				//z dir
+				kindexf = (x)*s*s+(y)*s+(z+1);
+				cblas_zgemm(CblasRowMajor, CblasConjTrans, CblasNoTrans, n, n, n, &alpha, 
+								&evc[kindexi*n*n], n, &evc[kindexf*n*n], n, &beta, tempP, n);
+				for (l = 0; l < n; l++) {
+					berryc[3*BCcount*n+2*n+l]=tempP[l*n+l]/cabs(tempP[l*n+l]);
+					// printf("link var: (%9.6f,%9.6f)\t(%9.6f,%9.6f)\t(%9.6f,%9.6f)\n",
+					// 	creal(berryc[3*BCcount*n+l]), cimag(berryc[3*BCcount*n+l]), 
+					// 	creal(berryc[3*BCcount*n+n+l]), cimag(berryc[3*BCcount*n+n+l]), 
+					// 	creal(berryc[3*BCcount*n+2*n+l]), cimag(berryc[3*BCcount*n+2*n+l]) );
+				}
+				BCcount++;
+			}
+		}
+	}
+
+	printf("Test1\n");
+
+	lapack_complex_double tempBC[3] = { {0.0,0.0},{0.0,0.0},{0.0,0.0} };
+	s = 2*nkp; // redefine size of matrix
+
+	memset(bC, 0, 3*n*(2*nkp+2)*(2*nkp+2)*(2*nkp+2)* sizeof(double ));
+
+	printf("Test2\n");
+
+	for (i = -nkp; i < nkp-1; i++) {
+		for (j = -nkp; j < nkp-1; j++) {
+			for (k = -nkp; k < nkp-1; k++) {
+				for (l = 0; l < n; l++) {
+					x = i + nkp;
+					y = j + nkp;
+					z = k + nkp;
+					//printf("kx: (%i/%i), ky: (%i/%i), kz: (%i/%i)\n", x, 2*nkp, y, 2*nkp, z, 2*nkp);
+
+					kindexi = (x)*s*s+(y)*s+(z); //this is now index for berryc
+					kindexf = (x)*s*s+(y+1)*s+(z);
+
+					//printf("kindexi: %i\t, kindexf: %i\n", kindexi, kindexf);
+					
+					tempBC[0] = berryc[3*kindexi*n+n+l]*berryc[3*kindexf*n+2*n+l]/berryc[3*kindexi*n+2*n+l];
+					kindexf = (x)*s*s+(y)*s+(z+1);
+					//printf("kindexi: %i\t, kindexf: %i\n", kindexi, kindexf);
+					tempBC[0] = tempBC[0]/berryc[3*kindexf*n+n+l];
+
+					tempBC[1] = berryc[3*kindexi*n+2*n+l]*berryc[3*kindexf*n+l]/berryc[3*kindexi*n+l];
+					kindexf = (x+1)*s*s+(y)*s+(z);
+					//printf("kindexi: %i\t, kindexf: %i\n", kindexi, kindexf);
+					tempBC[1] = tempBC[1]/berryc[3*kindexf*n+2*n+l];
+
+					tempBC[2] = berryc[3*kindexi*n+l]*berryc[3*kindexf*n+n+l]/berryc[3*kindexi*n+n+l];
+					kindexf = (x)*s*s+(y+1)*s+(z);
+					//printf("kx: (%i/%i), ky: (%i/%i), kz: (%i/%i)\n", x, 2*nkp, y, 2*nkp, z, 2*nkp);
+					//printf("kindexi: %i\t, kindexf: %i\n", kindexi, kindexf);
+					tempBC[2] = tempBC[2]/berryc[3*kindexf*n+l];
+
+					//tempBC[0] = clog(tempBC[0]);
+					//tempBC[1] = clog(tempBC[1]);
+					//tempBC[2] = clog(tempBC[2]);
+
+					bC[3*n*kindexi+3*l+0] = cimag(clog(tempBC[0]))/M_PI;
+					bC[3*n*kindexi+3*l+1] = cimag(clog(tempBC[1]))/M_PI;
+					bC[3*n*kindexi+3*l+2] = cimag(clog(tempBC[2]))/M_PI;
+
+					printf("BC: (%9.6f)\t(%9.6f)\t(%9.6f)\n",
+							bC[3*n*kindexi+3*l+0], 
+							bC[3*n*kindexi+3*l+1], 
+							bC[3*n*kindexi+3*l+2] );
+				
+					// printf("BC: (%9.6f,%9.6f)\t(%9.6f,%9.6f)\t(%9.6f,%9.6f)\n",
+					// 		creal(tempBC[0]), cimag(tempBC[0]), 
+					// 		creal(tempBC[1]), cimag(tempBC[1]), 
+					// 		creal(tempBC[2]), cimag(tempBC[2]) );
+
+					// //M_PI
+				}
+			}
+		}
+	}
+
+
+	// printf("BC: (%9.6f,%9.6f)\t(%9.6f,%9.6f)\t(%9.6f,%9.6f)\n",
+	// 	creal(berryc[0]), cimag(berryc[0]), 
+	// 	creal(berryc[n]), cimag(berryc[n]), 
+	// 	creal(berryc[2*n]), cimag(berryc[2*n]));
+
+
+
+	
+}
+
 /* Note: k must have 3 elements!
 */
 void build_C(lapack_int nn_depth, int nn_total, double* nn, 
@@ -212,6 +733,62 @@ void build_H(lapack_int H_size, double* k, double* nn, int nn_total,
 		H_tb[(x+H_size)*2*H_size + H_size + y] += coef_table[2*i+1]*phase;
 	}
 
+
+}
+
+void build_TaAsH(lapack_int H_size, double* k, int* nn, double* nn_hops, int nn_total, 
+	lapack_complex_double* H_tb, lapack_complex_double* c_table){
+	
+	lapack_int i;
+	lapack_complex_double phase;// coef;
+	//Set Hamiltonian to all 0's
+	//memset(H_tb, 0, H_size * H_size * sizeof(lapack_complex_double ));
+	
+	//printf("nntotal: %i\n", nn_total);
+	for( i = 0; i < nn_total; i++ ) {
+		//For each nn pair
+		//Compute phase:
+		//phase = k[0]*nn_hops[3*i] + k[1]*nn_hops[3*i+1] + k[2]*nn_hops[3*i+2];
+		//phase = cexp(- I * phase);
+
+		phase = cexp(- I * (k[0]*nn_hops[3*i] + k[1]*nn_hops[3*i+1] + k[2]*nn_hops[3*i+2]) );
+		//lookup coefficient
+		//coef = c_table[ nn[3*i+2] ];
+
+		//H_tb[nn[3*i]*H_size + nn[3*i+1]] += coef*phase;
+
+		H_tb[nn[3*i]*H_size + nn[3*i+1]] += c_table[ nn[3*i+2] ]*phase;
+		//printf("index: %i\n", nn[3*i]*H_size + nn[3*i+1]);
+	}
+
+}
+
+void build_TaAsdHdk(lapack_int H_size, double* k, int* nn, double* nn_hops, int nn_total, 
+	lapack_complex_double* dH_tb, lapack_complex_double* c_table){
+	
+
+	lapack_int i, index;
+	lapack_complex_double coef;
+	lapack_int H_shift = H_size * H_size; //Size of one Hamiltonian.
+	
+	//Set dHdk to all 0's
+	memset(dH_tb, 0, H_size * H_size * 3 * sizeof(lapack_complex_double ));
+
+	for( i = 0; i < nn_total; i++ ) {
+		//For each nn pair
+		//Compute phase and multiply by -I*coefficient
+		coef = -I*c_table[ nn[3*i+2] ] * 
+				cexp(- I * (k[0]*nn_hops[3*i] + 
+						k[1]*nn_hops[3*i+1] + 
+						k[2]*nn_hops[3*i+2]) );
+
+		index = nn[3*i]*H_size + nn[3*i+1];
+		
+		//store x,y, and z derivatives
+		dH_tb[index] += nn_hops[3*i]*coef;
+		dH_tb[H_shift+index] += nn_hops[3*i+1]*coef;
+		dH_tb[2*H_shift+index] += nn_hops[3*i+2]*coef;
+	}
 
 }
 
@@ -463,6 +1040,8 @@ void build_test2dHdk(lapack_int H_size, double* k, double* nn, int nn_total,
 	dH_tb[2*H_shift+0] +=  (2*tz*cos(k[2]));
 	dH_tb[2*H_shift+3] += -(2*tz*cos(k[2]));
 }
+
+//void compute_BerryPhase()
 
 int compare_nn( const void* vec1, const void* vec2){
 	double* v1 = (double*)vec1;
